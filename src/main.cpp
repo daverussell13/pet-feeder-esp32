@@ -6,6 +6,7 @@
 #include <NTPClient.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <queue>
 #include "secrets.h"
 
 // Task init
@@ -17,10 +18,12 @@ struct FeedSchedule {
 };
 
 std::vector<FeedSchedule> schedules;
+std::queue<int> feedQueue;
 
 String prevTime = "";
 
 void checkSchedule();
+void feedingTask(void* params);
 
 // Servo init
 #define SERVO_PIN 18
@@ -82,6 +85,7 @@ void setup() {
 
   pubSubClient.setServer(mqtt_host, mqtt_port);
   pubSubClient.setCallback(mqttCallback);
+  xTaskCreate(feedingTask, "Feeding task", 1024 * 8, NULL, 2, NULL);
 }
 
 // Loop function
@@ -112,6 +116,17 @@ void checkSchedule() {
         feed(schedule.feedAmount);
       }
     }
+  }
+}
+
+void feedingTask(void* params) {
+  while(true) {
+    if (!feedQueue.empty()) {
+      int feedAmount = feedQueue.front();
+      feedQueue.pop();
+      feed(feedAmount);
+    }
+    vTaskDelay(300 / portTICK_PERIOD_MS);
   }
 }
 
@@ -276,7 +291,7 @@ void mqttCallback(char* topic, byte* message, unsigned int length) {
     publishAcknowledgement(strTopic, "Device " + device_id + " receive the message");
 
     int feedAmount = messageBuffer.toInt();
-    feed(feedAmount);
+    feedQueue.push(feedAmount);
   }
 
   if (strTopic == schedule_topic) {
@@ -303,7 +318,7 @@ void mqttCallback(char* topic, byte* message, unsigned int length) {
 }
 
 void publishAcknowledgement(String topic, String message) {
-  topic += "/acknowledgement";
-  pubSubClient.publish(topic.c_str(), message.c_str());
+  topic += "/acknowledge";
+  pubSubClient.publish(topic.c_str(), message.c_str(), false);
   Serial.println("Acknowledment sended");
 }
